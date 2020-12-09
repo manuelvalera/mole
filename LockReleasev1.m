@@ -75,7 +75,7 @@ dp = 0.05;
 
 TMAX = 16.1324636; TMIN = 10.0;
 
-T0 = TMAX*100;
+T0 = TMAX;
 
 for j=1:JMax
     for i=1:IMax
@@ -85,6 +85,11 @@ for j=1:JMax
     
         end
 end
+
+% T(1,:) = 0.0 ; %T(2,:);
+% T(end,:) = 0.0 ; % T(end-1,:);    
+% T(:,1) = 0.0 ; % T(:,2);
+% T(:,end) = 0.0 ; %T(:,end-1);  
 
 figure(1);
 u_v = squeeze(Tic);
@@ -103,8 +108,9 @@ S_ref   = 35.d0;
 T_ref   = 10.d0;
 drho_dS = 0.781d0;
 drho_dT = -0.1708d0;
-LStar = 0.05;
+LStar = 0.05; %1.0;  %?
 UStar = 1.0;
+rhoStar = 1000.35;
 gforce = 9.80;
 
 for j=1:JMax
@@ -115,6 +121,13 @@ for j=1:JMax
     end
 end
 
+dens(end,:) = rho_ref + drho_dT*(T(end,:)*T0-T_ref);
+dens(1,:) = rho_ref + drho_dT*(T(1,:)*T0-T_ref);
+
+dens(:,end) = rho_ref + drho_dT*(T(:,end)*T0-T_ref);
+dens(:,1) = rho_ref + drho_dT*(T(:,1)*T0-T_ref);
+
+dens = dens/rhoStar;
 
 DMax = max(max(dens));
 DMin = min(min(dens));
@@ -131,17 +144,31 @@ shading interp;
 %%
 buoy = zeros(IMax,JMax-1);
 
-buoy(1,:) = gforce*LStar*(dens(1,1:n)-rho_P0)/(rho_P0*(UStar^2));
+iatv = (X(:,1:JMax-1)+X(:,2:JMax))*0.50;
+jatv = (Y(:,1:JMax-1)+Y(:,2:JMax))*0.50;
+
+Fdens = griddedInterpolant(X, Y, dens); 
+datv = Fdens(iatv,jatv);
+
+
+%buoy(1,:) = gforce*LStar*(dens(1,1:n)-rho_P0)/(rho_P0*(UStar^2));
 
 for j=1:JMax-1
-    for i=1:IMax-1
+    for i=1:IMax
 
-        buoy(i,j) = gforce*LStar*(0.5*(dens(i,j)+dens(i+1,j))-rho_P0)/(rho_P0*(UStar^2));
+%        buoy(i,j) = gforce*LStar*(0.5*(dens(i,j)+dens(i+1,j))-rho_P0)/(rho_P0*(UStar^2));
+
+        buoy(i,j) = gforce*LStar*(datv(i,j)-rho_P0)/(rho_P0*(UStar^2));
 
     end
 end
 
-buoy(end,:) = buoy(end-1,:);
+% buoy(end,:) = 0.0; %buoy(end-1,:);
+% buoy(1,:) = 0.0; %buoy(2,:);
+% 
+% buoy(:,end) = 0.0 ; %buoy(:,end-1);
+% buoy(:,1) = 0.0 ; %buoy(:,2);
+
 
 figure(6);
 u_v = squeeze(buoy);
@@ -176,8 +203,11 @@ Dx = Dy;
 D = div2D(k,m,Dx,n,Dy); %div2DCurv(k,X,Y);
 G =  grad2D(k,m,Dx,n,Dy); % grad2DCurv(k,X,Y);
 
-%L = D*G;  %lap2D(k,IMax-1,Dx,JMax-1,Dy);
-L = lap2D(k,IMax-1,Dx,JMax-1,Dy);
+%D = div2DCurv(k,X,Y);
+%G = grad2DCurv(k,X,Y);
+
+L = D*G;  %lap2D(k,IMax-1,Dx,JMax-1,Dy);
+%L = lap2D(k,IMax-1,Dx,JMax-1,Dy);
 L = L + robinBC2D(k,m,Dx,n,Dy,0,1);
 
 idx1 = numel(uic);
@@ -185,7 +215,10 @@ idy1 = numel(vic);
 idx2 = idx1 + idy1;
 
 
-dt = 0.1;
+dtnondim = 2.0;
+
+dt = dtnondim*LStar/UStar;
+
 rho = rho_P0;
 D = rho/dt*D;
 G = -dt/rho*G;
@@ -269,10 +302,10 @@ Pp = reshape(p',[], 1);
 cs = 1447.0;
 
 
-tf = 1.7;
+tf = 2.0;
 nf = tf/dt ;
 beta = 1/cs;
-Re = 750;
+Re = 1000;
 IRe = 1.0/Re;
 nu = 0.0014;
 time_steps = linspace(0,tf,nf);
@@ -334,16 +367,16 @@ for time = 1:size(time_steps,2)
 
     %Predict u*
 
-       %RHS = zeros(IMax+1,JMax+1);
-    %u_star = zeros(IMax+1,JMax+1); %u;
-    %v_star = zeros(IMax+1,JMax+1); %v;
-    
+    RHSu = zeros(m,n+1);
+    RHSv = zeros(m+1,n);
+    RHST = zeros(m+1,n+1);
+   
     u_star = uatu;
     v_star = vatv;
     
    
-    for j = 2:JMax-1
-        for i = 2:IMax-2
+    for j = 2:n
+        for i = 2:m-1
     
             d2u_dy2 = (uatu(i-1,j)-2*uatu(i,j)+uatu(i+1,j))/(Dy^2);
             d2u_dx2 = (uatu(i,j-1)-2*uatu(i,j)+uatu(i,j+1))/(Dx^2);
@@ -353,15 +386,18 @@ for time = 1:size(time_steps,2)
             udu_dx  = uatu(i,j)*du_dx;
             vdu_dy  = vatu(i,j)*du_dy;  
 
+            RHSu(i,j) = - (udu_dx+vdu_dy - IRe*(d2u_dy2+d2u_dx2));
                       
-            u_star(i,j) = uatu(i,j) - dt*(udu_dx+vdu_dy - IRe*(d2u_dy2+d2u_dx2));
+           % u_star(i,j) = uatu(i,j) - dt*(udu_dx+vdu_dy - IRe*(d2u_dy2+d2u_dx2));
         end
     end
     
+    u_star = SSPRK102D(uatu,RHSu,dt);
+    
     %Predict v*
      
-    for j = 2:JMax-2
-        for i = 2:IMax-1
+    for j = 2:n-1
+        for i = 2:m
     
             d2v_dy2 = (vatv(i-1,j)-2*vatv(i,j)+vatv(i+1,j))/(Dy^2);
             d2v_dx2 = (vatv(i,j-1)-2*vatv(i,j)+vatv(i,j+1))/(Dx^2);
@@ -371,12 +407,18 @@ for time = 1:size(time_steps,2)
             udv_dx  = uatv(i,j)*dv_dx;
             vdv_dy  = vatv(i,j)*dv_dy;
                               
-            v_star(i,j) = vatv(i,j) - dt*( udv_dx+vdv_dy - IRe*(d2v_dy2+d2v_dx2));% - buoy(i,j) );
+            RHSv(i,j) = -(udv_dx+vdv_dy - IRe*(d2v_dy2+d2v_dx2));
+            
+           % v_star(i,j) = vatv(i,j) - dt*( udv_dx+vdv_dy - IRe*(d2v_dy2+d2v_dx2));% - buoy(i,j) );
            
         end
     end
+    
+    RHSv = RHSv - buoy;
+    
+    v_star = SSPRK102D(vatv,RHSv,dt);
 
-    v_star = v_star + dt*buoy;
+    %v_star = v_star - dt*buoy;
     
     [u_star,v_star,~] = applyboundaries2Dstar(u_star,v_star,p);
 
@@ -444,7 +486,7 @@ for time = 1:size(time_steps,2)
     uatc = Fu(X,Y);
     vatc = Fv(X,Y); 
     
-    [~,cav] = curl(Xp,Yp,u,v);
+    %[~,cav] = curl(Xp,Yp,u,v);
               
     %Interpolate and refresh arrays:
   
@@ -457,8 +499,8 @@ for time = 1:size(time_steps,2)
     Vu = reshape(vatu',[], 1);
     Uu = reshape(uatu',[], 1);    
     
-    for j = 2:JMax-2
-      for i = 2:IMax-2
+    for j = 2:n-1
+      for i = 2:m-1
     
             d2T_dy2 = (T(i-1,j)-2*T(i,j)+T(i+1,j))/(Dy^2);
             d2T_dx2 = (T(i,j-1)-2*T(i,j)+T(i,j+1))/(Dx^2);
@@ -467,35 +509,53 @@ for time = 1:size(time_steps,2)
             dT_dy = (T(i+1,j)-T(i-1,j))/(2*Dy);       
             udT_dx  = uatc(i,j)*dT_dx;
             vdT_dy  = vatc(i,j)*dT_dy;
-                    
+             
+            RHST(i,j) = -(udT_dx+vdT_dy - IRe*(d2T_dy2+d2T_dx2));
            
-            T(i,j) = T(i,j) - dt*(udT_dx+vdT_dy - IRe*(d2T_dy2+d2T_dx2));
+            %T(i,j) = T(i,j) - dt*(udT_dx+vdT_dy - IRe*(d2T_dy2+d2T_dx2));
            
         end
     end
     
-%     T(1,:) = 0.0 ; %T(2,:);
-%     T(end,:) = 0.0 ; % T(end-1,:);    
-% 
-%     
-%     T(:,1) = 0.0 ; % T(:,2);
-%     T(:,end) = 0.0 ; %T(:,end-1);  
-%     
+%      T(1,:) = 0.0 ; %T(2,:);
+%      T(end,:) = 0.0 ; % T(end-1,:);    
+%      T(:,1) = 0.0 ; % T(:,2);
+%      T(:,end) = 0.0 ; %T(:,end-1);  
+% %     
      
+    T = SSPRK102D(T,RHST,dt);
+
     dens = rho_ref + drho_dT*(T*T0-T_ref);  %EOS  
     
-    buoy(1,:) = gforce*LStar*(dens(1,1:n)-rho_P0)/(rho_P0*(UStar^2));
+    dens(end,:) = rho_ref + drho_dT*(T(end,:)*T0-T_ref);
+    dens(1,:) = rho_ref + drho_dT*(T(1,:)*T0-T_ref);
+     
+    dens(:,end) = rho_ref + drho_dT*(T(:,end)*T0-T_ref);
+    dens(:,1) = rho_ref + drho_dT*(T(:,1)*T0-T_ref);
 
+    dens = dens/rhoStar;
+    
+    Fdens = griddedInterpolant(X, Y, dens); 
+    datv = Fdens(iatv,jatv);
+
+    %buoy(1,:) = gforce*LStar*(dens(1,1:n)-rho_P0)/(rho_P0*(UStar^2));
+    
     for j=1:JMax-1
-        for i=1:IMax-1
+        for i=1:IMax
 
-            buoy(i,j) = gforce*LStar*(0.5*(dens(i,j)+dens(i+1,j))-rho_P0)/(rho_P0*(UStar^2));
+     %       buoy(i,j) = gforce*LStar*(0.5*(dens(i,j)+dens(i+1,j))-rho_P0)/(rho_P0*(UStar^2));
 
+             buoy(i,j) = gforce*LStar*(datv(i,j)-rho_P0)/(rho_P0*(UStar^2));
+     
         end
     end
-    
-    buoy(end,:) = buoy(end-1,:);
-    
+%     
+%     buoy(end,:) = 0.0; %buoy(end-1,:);
+%     buoy(1,:) = 0.0; %buoy(2,:);
+%     
+%     buoy(:,end) = 0.0; %buoy(:,end-1);
+%     buoy(:,1) = 0.0; %buoy(:,2);
+%     
     figure(2);
     u_v = squeeze(u(:,:));
     subplot(3,2,1)
@@ -525,6 +585,12 @@ for time = 1:size(time_steps,2)
     u_3 = squeeze(buoy(:,:));
     pcolor(u_3);
     title(['buoy'])
+    colorbar;
+    shading interp;
+    subplot(3,2,6)
+    u_3 = squeeze(dens(:,:));
+    pcolor(u_3);
+    title(['dens'])
     colorbar;
     shading interp;
     
